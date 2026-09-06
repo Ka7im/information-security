@@ -1,14 +1,14 @@
+import { generateRsa } from '../src/users/rsa.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  generateRsa,
   hashPassword,
   verifyPassword,
   generateChallenge,
   hashChallenge,
   createProof,
   verifyProof,
-} from '../src/crypto.js';
+} from '../src/auth/crypto.js';
 import { createClientProof } from '../../client/src/crypto.js';
 test('Challenge size and browser/server proof agreement', async () => {
   assert.equal(generateChallenge().length, 16);

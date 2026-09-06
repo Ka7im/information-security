@@ -17,21 +17,47 @@ flowchart LR
 
 Порты на схеме соответствуют стандартной конфигурации разработки. Браузер подключается к адресу своего приложения, а Vite перенаправляет `/ws` на backend. Backend не раздаёт HTML: обычный HTTP-запрос к нему получает 404. Переход на WebSocket обрабатывается отдельно через событие `upgrade`.
 
-| Файл                                                               | За что отвечает                                                     |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| [apps/backend/src/index.ts](apps/backend/src/index.ts)             | Запуск: настройки, пул БД, миграции, сервер и корректное завершение |
-| [apps/backend/src/config.ts](apps/backend/src/config.ts)           | Чтение `.env`, адрес БД, порт и разрешённые Origin                  |
-| [apps/backend/src/server.ts](apps/backend/src/server.ts)           | WebSocket, операции, проверки, сессии, серверные логи               |
-| [apps/backend/src/db.ts](apps/backend/src/db.ts)                   | Миграции, получение challenge и преобразование записей БД в ответы  |
-| [apps/backend/src/crypto.ts](apps/backend/src/crypto.ts)           | SHA-256, генерация t, вычисление и сравнение proof, генерация RSA   |
-| [apps/client/src/App.tsx](apps/client/src/App.tsx)                 | Два шага входа, профиль, выход и клиентские записи журнала          |
-| [apps/client/src/crypto.ts](apps/client/src/crypto.ts)             | SHA-256 в браузере через Web Crypto                                 |
-| [apps/server-ui/src/App.tsx](apps/server-ui/src/App.tsx)           | Создание и список пользователей, отображение RSA и журнал сервера   |
-| [packages/shared/src/index.ts](packages/shared/src/index.ts)       | Общие типы запросов, ответов, профиля и логов                       |
-| [packages/ui/src/connection.ts](packages/ui/src/connection.ts)     | Отправка запросов, ожидание ответов, события и переподключение      |
-| [packages/ui/src/AuthJournal.tsx](packages/ui/src/AuthJournal.tsx) | Общий компонент отображения журнала                                 |
+| Файл                                                                                                 | За что отвечает                                                     |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [apps/backend/src/index.ts](apps/backend/src/index.ts)                                               | Запуск: настройки, пул БД, миграции, сервер и корректное завершение |
+| [apps/backend/src/config.ts](apps/backend/src/config.ts)                                             | Чтение `.env`, адрес БД, порт и разрешённые Origin                  |
+| [apps/backend/src/server.ts](apps/backend/src/server.ts)                                             | HTTP upgrade, список серверных соединений и закрытие сервера        |
+| [apps/backend/src/transport/connection.ts](apps/backend/src/transport/connection.ts)                 | Приём запросов, ответы, блокировка параллельных операций и рассылка |
+| [apps/backend/src/protocol/schemas.ts](apps/backend/src/protocol/schemas.ts)                         | Проверка оболочки запроса и payload через Zod                       |
+| [apps/backend/src/protocol/errors.ts](apps/backend/src/protocol/errors.ts)                           | Ошибки операций и их преобразование в ответы                        |
+| [apps/backend/src/database/pool.ts](apps/backend/src/database/pool.ts)                               | Пул соединений PostgreSQL                                           |
+| [apps/backend/src/database/migrations.ts](apps/backend/src/database/migrations.ts)                   | Миграции схемы БД                                                   |
+| [apps/backend/src/auth/session.ts](apps/backend/src/auth/session.ts)                                 | AuthSession: выдача challenge, вход, профиль и выход                |
+| [apps/backend/src/auth/challenge-repository.ts](apps/backend/src/auth/challenge-repository.ts)       | Транзакционное получение и обновление t                             |
+| [apps/backend/src/auth/crypto.ts](apps/backend/src/auth/crypto.ts)                                   | SHA-256, генерация t, вычисление и сравнение proof                  |
+| [apps/backend/src/auth/journal.ts](apps/backend/src/auth/journal.ts)                                 | Группировка логов и разделение клиентских и серверных значений      |
+| [apps/backend/src/users/admin-session.ts](apps/backend/src/users/admin-session.ts)                   | Черновик RSA и операции управления пользователями                   |
+| [apps/backend/src/users/repository.ts](apps/backend/src/users/repository.ts)                         | SQL-запросы создания, списка и поиска пользователей                 |
+| [apps/backend/src/users/model.ts](apps/backend/src/users/model.ts)                                   | Тип записи БД и преобразования toProfile/toUser                     |
+| [apps/backend/src/users/rsa.ts](apps/backend/src/users/rsa.ts)                                       | Генерация параметров RSA                                            |
+| [apps/client/src/App.tsx](apps/client/src/App.tsx)                                                   | Композиция экрана клиента                                           |
+| [apps/client/src/hooks/useAuth.ts](apps/client/src/hooks/useAuth.ts)                                 | Состояние формы, этапы входа, таймер и выход                        |
+| [apps/client/src/components/LoginForm.tsx](apps/client/src/components/LoginForm.tsx)                 | Отображение двух шагов формы входа                                  |
+| [apps/client/src/components/ProfileCard.tsx](apps/client/src/components/ProfileCard.tsx)             | Профиль и кнопка выхода                                             |
+| [apps/client/src/crypto.ts](apps/client/src/crypto.ts)                                               | SHA-256 в браузере через Web Crypto                                 |
+| [apps/server-ui/src/App.tsx](apps/server-ui/src/App.tsx)                                             | Композиция серверного экрана                                        |
+| [apps/server-ui/src/hooks/useUserManagement.ts](apps/server-ui/src/hooks/useUserManagement.ts)       | Загрузка пользователей, генерация RSA и отправка формы              |
+| [apps/server-ui/src/components/CreateUserForm.tsx](apps/server-ui/src/components/CreateUserForm.tsx) | Форма создания пользователя                                         |
+| [apps/server-ui/src/components/UserList.tsx](apps/server-ui/src/components/UserList.tsx)             | Список пользователей                                                |
+| [apps/server-ui/src/components/RsaParameters.tsx](apps/server-ui/src/components/RsaParameters.tsx)   | Просмотр и копирование параметров RSA                               |
+| [packages/shared/src/index.ts](packages/shared/src/index.ts)                                         | Общие типы запросов, ответов, профиля и логов                       |
+| [packages/ui/src/connection.ts](packages/ui/src/connection.ts)                                       | Публичные экспорты транспорта и хука                                |
+| [packages/ui/src/transport/Connection.ts](packages/ui/src/transport/Connection.ts)                   | Браузерный WebSocket-транспорт, ответы и переподключение            |
+| [packages/ui/src/hooks/useConnection.ts](packages/ui/src/hooks/useConnection.ts)                     | Связь транспорта с React-состоянием и журналом                      |
+| [packages/ui/src/AuthJournal.tsx](packages/ui/src/AuthJournal.tsx)                                   | Общий компонент отображения журнала                                 |
 
 Проект собран через npm workspaces: приложения используют общие пакеты `@app/shared` и `@app/ui`. TypeScript проверяет согласованность типов при разработке, а Zod в backend проверяет фактически полученные сообщения во время работы.
+
+### Границы модулей после рефакторинга
+
+Backend устроен по цепочке: транспорт → сессия соответствующего канала → репозиторий или криптографическая функция. В транспорте нет SQL и вычисления H; сессии не отправляют WebSocket-сообщения напрямую. Каждому соединению создаётся собственный экземпляр `AuthSession` или `AdminSession`. Функция `isConnected` позволяет не сохранять результат асинхронной операции в уже закрытую сессию.
+
+В интерфейсах `App.tsx` собирает страницу, `hooks` управляют состоянием и запросами, `components` отображают данные и вызывают переданные обработчики. Класс `Connection` не зависит от React; `useConnection` подключает его к жизненному циклу компонента. Общий файл `connection.ts` сохраняет прежний путь импорта пакета.
 
 ## 2. Запуск и хранение данных
 
@@ -47,7 +73,7 @@ flowchart LR
 
 Первая миграция создаёт пользователей, вторая — challenge. Поле `password_hash` содержит 64 символа hex, то есть SHA-256 пароля. Исходного пароля в БД нет. Поле `t` имеет тип `bytea` и ограничение длины ровно 16 байтов. Внешний ключ с `ON DELETE CASCADE` удаляет challenge вместе с пользователем.
 
-Функция `profile(row)` возвращает только публичные поля профиля. Функция `user(row)` добавляет параметры RSA для серверного интерфейса. Обе явно собирают ответ, поэтому `password_hash` из записи БД не попадает в список пользователей или профиль.
+Функция `toProfile(row)` возвращает только публичные поля профиля. Функция `toUser(row)` добавляет параметры RSA для серверного интерфейса. Обе явно собирают ответ, поэтому `password_hash` из записи БД не попадает в список пользователей или профиль.
 
 ## 3. Как создаётся пользователь
 
@@ -112,7 +138,7 @@ sequenceDiagram
 
 ### Шаг 1: отправка логина
 
-В `App.tsx` клиента отсутствие `challenge` означает первый шаг формы. При отправке создаётся идентификатор попытки, записывается локальный лог и вызывается `request('auth.challenge', { login })`.
+В `hooks/useAuth.ts` клиента отсутствие `challenge` означает первый шаг формы. При отправке создаётся идентификатор попытки, записывается локальный лог и вызывается `request('auth.challenge', { login })`.
 
 Backend сначала сбрасывает прежнюю сессию и привязку challenge этого соединения. Затем проверяет логин и вызывает `getChallenge`. Если пользователь не найден, возвращается ошибка, поле пароля не открывается.
 
@@ -144,20 +170,20 @@ Backend сначала сбрасывает прежнюю сессию и пр�
 
 `verifyProof` проверяет формат строк, переводит обе в 32-байтовые буферы и сравнивает через `timingSafeEqual`. Срок challenge проверяется ещё раз после чтения БД, чтобы ожидание запроса не позволило принять уже просроченное значение.
 
-При совпадении и наличии пользователя `session` получает его UUID. Клиент получает профиль и переключается на экран «Ваш профиль». При несовпадении возвращается `INVALID_CREDENTIALS`, сессия остаётся пустой; действующий challenge можно использовать для новой попытки ввода пароля.
+При совпадении и наличии пользователя `AuthSession.userId` получает его UUID. Клиент получает профиль и переключается на экран «Ваш профиль». При несовпадении возвращается `INVALID_CREDENTIALS`, сессия остаётся пустой; действующий challenge можно использовать для новой попытки ввода пароля.
 
 ## 6. Время жизни разных состояний
 
-| Состояние                    | Где хранится                                        | Когда сбрасывается                                                                   |
-| ---------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Пользователь и RSA           | PostgreSQL                                          | При удалении записи пользователя                                                     |
-| t и срок                     | PostgreSQL                                          | t заменяется при запросе после истечения 24 часов; удаляется вместе с пользователем  |
-| Привязка challenge к клиенту | Память backend, конкретный WebSocket                | Новый запрос challenge, выход, отключение или обнаруженное истечение срока           |
-| Авторизация `session`        | Память backend, конкретный WebSocket                | Выход, отключение, начало нового входа или отсутствие пользователя при `auth.me`     |
-| Черновик RSA `draft`         | Память backend, конкретный WebSocket администратора | Успешное создание пользователя или отключение; повторная генерация заменяет черновик |
-| Форма и журнал               | React-состояние в браузере                          | По действиям интерфейса; полностью при перезагрузке страницы                         |
+| Состояние                        | Где хранится                                        | Когда сбрасывается                                                                   |
+| -------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Пользователь и RSA               | PostgreSQL                                          | При удалении записи пользователя                                                     |
+| t и срок                         | PostgreSQL                                          | t заменяется при запросе после истечения 24 часов; удаляется вместе с пользователем  |
+| Привязка challenge к клиенту     | Память backend, конкретный WebSocket                | Новый запрос challenge, выход, отключение или обнаруженное истечение срока           |
+| Авторизация `AuthSession.userId` | Память backend, конкретный WebSocket                | Выход, отключение, начало нового входа или отсутствие пользователя при `auth.me`     |
+| Черновик RSA `draft`             | Память backend, конкретный WebSocket администратора | Успешное создание пользователя или отключение; повторная генерация заменяет черновик |
+| Форма и журнал                   | React-состояние в браузере                          | По действиям интерфейса; полностью при перезагрузке страницы                         |
 
-Истечение t не завершает уже установленную сессию. `auth.me` проверяет `session` и наличие пользователя, а не срок challenge. Cookies или JWT для входа здесь не создаются. После переподключения WebSocket новый, поэтому нужно войти заново; сохранённое в БД t при этом может остаться прежним.
+Истечение t не завершает уже установленную сессию. `auth.me` проверяет `AuthSession.userId` и наличие пользователя, а не срок challenge. Cookies или JWT для входа здесь не создаются. После переподключения WebSocket новый, поэтому нужно войти заново; сохранённое в БД t при этом может остаться прежним.
 
 В клиенте таймер возвращает форму к отправке логина при истечении срока. Окончательное решение всё равно принимает backend по своим часам. Счётчик `generation` помогает игнорировать результат асинхронной операции, если форма уже была сброшена отключением, сменой логина или таймером.
 
@@ -195,7 +221,7 @@ Backend сначала сбрасывает прежнюю сессию и пр�
 
 ## 8. Как работают журналы
 
-Серверная функция `log` создаёт `AuthLog` и отправляет событие `{type: 'auth.log', entry}`. Поля записи:
+Функция `log` из `auth/journal.ts` создаёт `AuthLog`, а транспорт отправляет событие `{type: 'auth.log', entry}`. Поля записи:
 
 | Поле        | Назначение                                                                                          |
 | ----------- | --------------------------------------------------------------------------------------------------- |
@@ -212,7 +238,7 @@ Backend сначала сбрасывает прежнюю сессию и пр�
 
 Ни исходный пароль, ни его отдельный SHA-256 в записи не добавляются. Клиент видит B, H и результат сравнения; серверное окно дополнительно показывает t в hex и H′. При ошибке могут появиться отдельные записи о неудачном сравнении и об ответе с кодом ошибки.
 
-`useConnection` хранит последние 500 записей через `.slice(-500)`. `AuthJournal` выводит их в область `role="log"` с прокруткой. Кнопка очистки очищает только журнал текущего окна. Выход из аккаунта не удаляет журнал; перезагрузка страницы удаляет его. События `users.changed` обрабатываются отдельно, поэтому каждый новый лог не вызывает запрос списка пользователей.
+`useConnection` хранит последние 500 записей через `.slice(-MAX_LOG_ENTRIES)`. `AuthJournal` выводит их в область `role="log"` с прокруткой. Кнопка очистки очищает только журнал текущего окна. Выход из аккаунта не удаляет журнал; перезагрузка страницы удаляет его. События `users.changed` обрабатываются отдельно, поэтому каждый новый лог не вызывает запрос списка пользователей.
 
 ## 9. Ошибки и границы реализации
 
@@ -235,7 +261,7 @@ Backend сначала сбрасывает прежнюю сессию и пр�
 
 ## 10. Как проверить и читать реализацию
 
-Для последовательного чтения начните с `apps/client/src/App.tsx`: обработчик `submit` показывает два шага интерфейса. Затем перейдите к веткам `auth.challenge` и `auth.login` в `server.ts`, к `getChallenge` в `db.ts` и к функциям в обоих `crypto.ts`. После этого прочитайте `Connection` и `AuthJournal`, чтобы связать сообщения с отображением.
+Для последовательного чтения начните с `apps/client/src/hooks/useAuth.ts`: обработчик `submit` показывает два шага входа. Затем перейдите к методам `issueChallenge` и `login` в `apps/backend/src/auth/session.ts`, к `getChallenge` в `auth/challenge-repository.ts` и к функциям клиентского и серверного `crypto.ts`. После этого прочитайте `transport/Connection.ts`, `hooks/useConnection.ts` и `AuthJournal`, чтобы связать сообщения с отображением.
 
 В [crypto.test.ts](apps/backend/test/crypto.test.ts) проверяются длина t, фиксированный хеш, совпадение браузерной и серверной формулы, обработка паролей с кириллицей и пробелами, сравнение proof и параметры RSA. Браузерная функция в этом тесте вызывается в среде Node.js с Web Crypto.
 

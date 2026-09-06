@@ -20,7 +20,7 @@ npm.cmd run dev
 
 Подробный разбор кода, схемы обмена, формулы, таблицы БД и журналов: [Как устроена система](ARCHITECTURE.md).
 
-- `apps/backend`: WebSocket-сервер, проверка входных данных, PostgreSQL и версионируемые SQL-миграции в `src/db.ts`.
+- `apps/backend`: WebSocket-сервер, проверка входных данных, PostgreSQL и версионируемые SQL-миграции в `src/database/migrations.ts`.
 - `apps/server-ui` и `apps/client`: независимые React-приложения.
 - `packages/shared` и `packages/ui`: типы протокола, транспорт с переподключением и оформление.
 

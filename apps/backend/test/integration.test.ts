@@ -6,9 +6,10 @@ import { WebSocket } from 'ws';
 import type { AddressInfo } from 'node:net';
 import type { Operation, Operations } from '@app/shared';
 import { config } from '../src/config.js';
-import { createPool, migrate } from '../src/db.js';
+import { createPool } from '../src/database/pool.js';
+import { migrate } from '../src/database/migrations.js';
 import { createApplication } from '../src/server.js';
-import { hashPassword, createProof } from '../src/crypto.js';
+import { hashPassword, createProof } from '../src/auth/crypto.js';
 import type { AuthLog } from '@app/shared';
 test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
   const pool = createPool(config.databaseUrl);
