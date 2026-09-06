@@ -1,0 +1,18 @@
+{
+  "name": "@app/ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./AuthJournal": "./src/AuthJournal.tsx",
+    "./connection": "./src/connection.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "dependencies": {
+    "@app/shared": "1.0.0",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0"
+  }
+}
