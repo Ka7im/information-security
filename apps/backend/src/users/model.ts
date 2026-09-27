@@ -4,6 +4,8 @@ export interface UserRow {
   login: string;
   password_hash: string;
   telegram_login: string;
+  telegram_chat_id: string | null;
+  telegram_user_id: string | null;
   created_at: Date;
   p: string;
   q: string;
@@ -22,5 +24,5 @@ export function toProfile(row: UserRow): Profile {
 }
 export function toUser(row: UserRow): User {
   const rsa: RsaParameters = { p: row.p, q: row.q, n: row.n, phi: row.phi, e: row.e, d: row.d };
-  return { ...toProfile(row), rsa };
+  return { ...toProfile(row), rsa, telegramLinked: !!row.telegram_chat_id };
 }

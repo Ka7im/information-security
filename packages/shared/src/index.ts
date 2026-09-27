@@ -13,9 +13,11 @@ export interface RsaParameters {
   d: string;
 }
 export interface User extends Profile {
+  telegramLinked: boolean;
   rsa: RsaParameters;
 }
 export interface Challenge {
+  telegramExpiresAt: string;
   challengeHash: string;
   expiresAt: string;
 }

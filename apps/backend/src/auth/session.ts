@@ -6,11 +6,15 @@ import { toProfile } from '../users/model.js';
 import { getChallenge } from './challenge-repository.js';
 import { hashChallenge, createProof, verifyProof } from './crypto.js';
 import type { AuthLogger } from './journal.js';
+import { getTelegramCode, type TelegramCode } from '../telegram/repository.js';
+import { unavailableTelegram, type TelegramSender } from '../telegram/bot.js';
 
 interface IssuedChallenge {
   userId: string;
   hash: string;
   expiresAt: number;
+  telegramExpiresAt: number;
+  telegramCreatedAt: number;
 }
 
 /** Авторизация и выданный challenge живут в пределах одного WebSocket. */
@@ -23,6 +27,7 @@ export class AuthSession {
     private now: () => number,
     private isConnected: () => boolean,
     private log: AuthLogger,
+    private telegram: TelegramSender = unavailableTelegram,
   ) {}
 
   clear() {
@@ -56,17 +61,28 @@ export class AuthSession {
       throw new RequestError('INVALID_CREDENTIALS', 'Пользователь с таким логином не найден.');
     const hash = hashChallenge(result.t);
     const expiresAt = result.expiresAt.toISOString();
+    const telegram = await getTelegramCode(this.pool, result.userId, this.now);
+    await this.telegram.sendCode(telegram.chatId, login, telegram.code, telegram.expires_at);
+    const issued = {
+      userId: result.userId,
+      hash,
+      expiresAt: result.expiresAt.getTime(),
+      telegramExpiresAt: telegram.expires_at.getTime(),
+      telegramCreatedAt: telegram.created_at.getTime(),
+    };
+    this.checkExpiration(issued);
     this.log(
       2,
       `${result.generated ? 'Сгенерировано' : 'Повторно используется'} t (128 бит), действует до ${expiresAt}.`,
       ` t = ${result.t.toString('hex')}`,
     );
     this.log(2, `Вычислено SHA-256(t) = ${hash}`);
+    this.log(3, `Код отправлен в Telegram, действует до ${telegram.expires_at.toISOString()}.`);
     if (this.isConnected()) {
-      this.challenge = { userId: result.userId, hash, expiresAt: result.expiresAt.getTime() };
+      this.challenge = issued;
     }
     this.log(3, `Отправка клиенту SHA-256(t) = ${hash}`);
-    return { challengeHash: hash, expiresAt };
+    return { challengeHash: hash, expiresAt, telegramExpiresAt: telegram.expires_at.toISOString() };
   }
 
   private requireChallenge() {
@@ -80,6 +96,13 @@ export class AuthSession {
       this.challenge = undefined;
       throw new RequestError('CHALLENGE_EXPIRED', 'Срок t истёк. Отправьте логин повторно.');
     }
+    if (this.now() >= challenge.telegramExpiresAt) {
+      this.challenge = undefined;
+      throw new RequestError(
+        'TELEGRAM_CODE_EXPIRED',
+        'Срок Telegram-кода истёк. Запросите код повторно.',
+      );
+    }
   }
 
   private async login(payload: unknown) {
@@ -88,8 +111,29 @@ export class AuthSession {
     const challenge = this.requireChallenge();
     this.log(4, `Получено H = ${proof}`);
     const row = await findUserById(this.pool, challenge.userId);
-    const expected = createProof(row?.password_hash ?? '0'.repeat(64), challenge.hash);
-    this.log(5, 'Вычислено H′ = SHA-256(SHA-256(пароль из БД) + SHA-256(t)).', ` H′ = ${expected}`);
+    const code = (
+      await this.pool.query<TelegramCode>('SELECT * FROM telegram_codes WHERE user_id=$1', [
+        challenge.userId,
+      ])
+    ).rows[0];
+    this.checkExpiration(challenge);
+    if (
+      !code ||
+      code.created_at.getTime() !== challenge.telegramCreatedAt ||
+      code.expires_at.getTime() !== challenge.telegramExpiresAt
+    ) {
+      this.challenge = undefined;
+      throw new RequestError(
+        'TELEGRAM_CODE_EXPIRED',
+        'Telegram-код обновлён. Запросите код повторно.',
+      );
+    }
+    const expected = createProof(row?.password_hash ?? '0'.repeat(64), challenge.hash, code.code);
+    this.log(
+      5,
+      'Вычислено H′ = SHA-256(SHA-256(пароль из БД) + SHA-256(t) + SHA-256(tgМетка)).',
+      ` H′ = ${expected}`,
+    );
     const valid = verifyProof(proof, expected);
     // Запрос БД мог завершиться уже после истечения срока.
     this.checkExpiration(challenge);
@@ -97,7 +141,9 @@ export class AuthSession {
       6,
       row && valid ? 'H′ = H. Вход выполнен, соединение авторизовано.' : 'H′ ≠ H. Вход отклонён.',
     );
-    if (!row || !valid) throw new RequestError('INVALID_CREDENTIALS', 'Неверный логин или пароль.');
+    if (!row || !valid)
+      throw new RequestError('INVALID_CREDENTIALS', 'Неверный пароль или Telegram-код.');
+    this.challenge = undefined;
     if (this.isConnected()) this.userId = row.id;
     return toProfile(row);
   }

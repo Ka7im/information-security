@@ -11,12 +11,14 @@ export function useAuth() {
   const [profile, setProfile] = useState<Profile>();
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [telegramCode, setTelegramCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!connected) {
       setProfile(undefined);
       setPassword('');
+      setTelegramCode('');
       setChallenge(undefined);
       generation.current++;
     }
@@ -28,9 +30,14 @@ export function useAuth() {
         generation.current++;
         setChallenge(undefined);
         setPassword('');
-        setError('Срок t истёк. Отправьте логин повторно.');
+        setTelegramCode('');
+        setError('Срок подтверждения истёк. Запросите код повторно.');
       },
-      Math.max(0, Date.parse(challenge.expiresAt) - Date.now()),
+      Math.max(
+        0,
+        Math.min(Date.parse(challenge.expiresAt), Date.parse(challenge.telegramExpiresAt)) -
+          Date.now(),
+      ),
     );
     return () => clearTimeout(timer);
   }, [challenge]);
@@ -44,14 +51,17 @@ export function useAuth() {
       message,
     });
   }
-  async function submit(event: FormEvent) {
+  async function submit(event: FormEvent, resend = false) {
     event.preventDefault();
     setBusy(true);
     setError('');
     const currentGeneration = generation.current;
     const transport = connection.current!;
     try {
-      if (!challenge) {
+      if (!challenge || resend) {
+        setChallenge(undefined);
+        setTelegramCode('');
+        setPassword('');
         attempt.current = crypto.randomUUID();
         log(1, `Отправка логина: ${login.trim()}`);
         const received = await transport.request('auth.challenge', { login }, attempt.current);
@@ -59,14 +69,17 @@ export function useAuth() {
         setChallenge(received);
         log(
           3,
-          `Получено SHA-256(t) = ${received.challengeHash}; действует до ${received.expiresAt}`,
+          `Получено SHA-256(t) = ${received.challengeHash}; действует до ${received.expiresAt}. Код отправлен в Telegram, действует до ${received.telegramExpiresAt}.`,
         );
       } else {
         if (!crypto.subtle)
           throw new Error('Для вычисления SHA-256 откройте клиент через localhost или HTTPS.');
-        log(4, 'Вычисление SHA-256(пароль), затем H = SHA-256(SHA-256(пароль) + SHA-256(t)).');
-        const proof = await createClientProof(password, challenge.challengeHash);
+        if (!/^[0-9]{6}$/.test(telegramCode))
+          throw new Error('Введите шестизначный код из Telegram.');
+        log(4, 'Вычисление H = SHA-256(SHA-256(пароль) + SHA-256(t) + SHA-256(tgМетка)).');
+        const proof = await createClientProof(password, challenge.challengeHash, telegramCode);
         setPassword('');
+        setTelegramCode('');
         if (generation.current !== currentGeneration) return;
         log(4, `Вычислено и отправляется H = ${proof}`);
         const result = await transport.request('auth.login', { proof });
@@ -80,8 +93,15 @@ export function useAuth() {
       const failure = e as Error & { code?: string };
       setError(failure.message);
       log(6, failure.message);
-      if (['CHALLENGE_EXPIRED', 'CHALLENGE_REQUIRED'].includes(failure.code ?? ''))
+      if (
+        ['CHALLENGE_EXPIRED', 'CHALLENGE_REQUIRED', 'TELEGRAM_CODE_EXPIRED'].includes(
+          failure.code ?? '',
+        )
+      ) {
         setChallenge(undefined);
+        setPassword('');
+        setTelegramCode('');
+      }
     } finally {
       setBusy(false);
     }
@@ -102,6 +122,7 @@ export function useAuth() {
     generation.current++;
     setChallenge(undefined);
     setPassword('');
+    setTelegramCode('');
     setError('');
   }
   return {
@@ -114,6 +135,9 @@ export function useAuth() {
     setLogin,
     password,
     setPassword,
+    telegramCode,
+    setTelegramCode,
+    resend: (event: FormEvent) => submit(event, true),
     error,
     busy,
     submit,

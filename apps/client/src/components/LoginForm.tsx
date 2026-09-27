@@ -5,6 +5,9 @@ type LoginFormProps = Pick<
   | 'setLogin'
   | 'password'
   | 'setPassword'
+  | 'telegramCode'
+  | 'setTelegramCode'
+  | 'resend'
   | 'challenge'
   | 'busy'
   | 'connected'
@@ -16,6 +19,9 @@ export function LoginForm({
   setLogin,
   password,
   setPassword,
+  telegramCode,
+  setTelegramCode,
+  resend,
   challenge,
   busy,
   connected,
@@ -25,6 +31,10 @@ export function LoginForm({
   return (
     <form onSubmit={submit}>
       <h2>Добро пожаловать</h2>
+      <p>
+        Перед входом отправьте /start боту с Telegram-аккаунта, указанного при регистрации. Ссылку
+        на бота выдаёт администратор.
+      </p>
       <label>
         Логин
         <input
@@ -55,12 +65,40 @@ export function LoginForm({
               disabled={busy}
             />
           </label>
+          <label>
+            Код из Telegram
+            <input
+              required
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              minLength={6}
+              maxLength={6}
+              value={telegramCode}
+              onChange={(e) => setTelegramCode(e.target.value)}
+              disabled={busy}
+            />
+          </label>
+          <p>
+            Код действует до {new Date(challenge.telegramExpiresAt).toLocaleString('ru-RU')}.
+            Повторная отправка не продлевает срок.
+          </p>
         </>
       )}
       <div className="actions">
         <button disabled={!connected || busy}>
-          {busy ? 'Обработка…' : challenge ? 'Войти' : 'Получить SHA-256(t)'}
+          {busy ? 'Обработка…' : challenge ? 'Войти' : 'Получить код и SHA-256(t)'}
         </button>
+        {challenge && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy || !connected}
+            onClick={resend}
+          >
+            Отправить код повторно
+          </button>
+        )}
         {challenge && (
           <button type="button" className="secondary" disabled={busy} onClick={changeLogin}>
             Сменить логин

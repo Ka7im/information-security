@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { resolve } from 'node:path';
 dotenv.config({ path: [resolve('.env'), resolve('../../.env')], quiet: true });
 export const config = {
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   databaseUrl:
     process.env.DATABASE_URL ??
     'postgresql://security:local_security_password@127.0.0.1:55432/security',

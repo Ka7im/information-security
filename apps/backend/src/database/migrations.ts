@@ -28,6 +28,19 @@ export async function migrate(pool: pg.Pool): Promise<void> {
       )`);
       await client.query('INSERT INTO schema_migrations(version) VALUES (2)');
     }
+    const telegramMigration = await client.query(
+      'SELECT version FROM schema_migrations WHERE version = 3',
+    );
+    if (!telegramMigration.rowCount) {
+      await client.query(`ALTER TABLE users ADD COLUMN telegram_chat_id text, ADD COLUMN telegram_user_id text;
+        CREATE TABLE telegram_codes (
+          user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          code char(6) NOT NULL CHECK (code ~ '^[1-9][0-9]{5}$'),
+          created_at timestamptz NOT NULL,
+          expires_at timestamptz NOT NULL
+        )`);
+      await client.query('INSERT INTO schema_migrations(version) VALUES (3)');
+    }
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

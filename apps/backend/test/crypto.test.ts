@@ -15,8 +15,11 @@ test('Challenge size and browser/server proof agreement', async () => {
   const hash = hashChallenge(Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex'));
   assert.equal(hash, 'be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991');
   for (const password of ['abc', 'пароль', ' пароль ']) {
-    const expected = createProof(hashPassword(password), hash);
-    assert.equal(await createClientProof(password, hash), expected);
+    const expected = createProof(hashPassword(password), hash, '123456');
+    assert.equal(await createClientProof(password, hash, '123456'), expected);
+    assert.equal(expected, hashPassword(hashPassword(password) + hash + hashPassword('123456')));
+    assert.notEqual(expected, hashPassword(hashPassword(password) + hash));
+    assert.notEqual(await createClientProof(password, hash, '654321'), expected);
     assert.equal(verifyProof(expected, expected), true);
     assert.equal(verifyProof('ff', expected), false);
     assert.equal(verifyProof('z'.repeat(64), expected), false);

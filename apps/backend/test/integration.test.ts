@@ -11,6 +11,8 @@ import { migrate } from '../src/database/migrations.js';
 import { createApplication } from '../src/server.js';
 import { hashPassword, createProof } from '../src/auth/crypto.js';
 import type { AuthLog } from '@app/shared';
+import { TelegramBot, unavailableTelegram, type TelegramSender } from '../src/telegram/bot.js';
+import { RequestError } from '../src/protocol/errors.js';
 test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
   const pool = createPool(config.databaseUrl);
   const schema = `test_${randomUUID().replaceAll('-', '')}`;
@@ -19,7 +21,24 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
   url.searchParams.set('options', `-c search_path=${schema}`);
   const db = createPool(url.toString());
   let now = Date.now();
-  const app = createApplication(db, ['http://localhost:5173', 'http://localhost:5174'], () => now);
+  const deliveries: { chatId: string; login: string; code: string; expiresAt: Date }[] = [];
+  let failDelivery = false;
+  let deliveryAdvance = 0;
+  const telegram: TelegramSender = {
+    async sendCode(chatId, login, code, expiresAt) {
+      if (failDelivery) throw new RequestError('TELEGRAM_UNAVAILABLE', 'Telegram unavailable');
+      deliveries.push({ chatId, login, code, expiresAt });
+      now += deliveryAdvance;
+    },
+  };
+  const lastCode = (login = 'alice') =>
+    [...deliveries].reverse().find((item) => item.login === login)!.code;
+  const app = createApplication(
+    db,
+    ['http://localhost:5173', 'http://localhost:5174'],
+    () => now,
+    telegram,
+  );
   const sockets: WebSocket[] = [];
   try {
     await migrate(db);
@@ -79,7 +98,7 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
     async function login(password: string) {
       const challenge = await request(client, 'auth.challenge', { login: 'alice' });
       return request(client, 'auth.login', {
-        proof: createProof(hashPassword(password), challenge.data.challengeHash),
+        proof: createProof(hashPassword(password), challenge.data.challengeHash, lastCode()),
       });
     }
     assert.equal((await request(client, 'auth.me')).error.code, 'UNAUTHORIZED');
@@ -125,6 +144,65 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
       true,
     );
     assert.equal((await request(admin, 'users.list')).data.length, 2);
+    assert.equal(created.data.telegramLinked, false);
+    assert.equal(
+      (await request(client, 'auth.challenge', { login: 'alice' })).error.code,
+      'TELEGRAM_NOT_LINKED',
+    );
+    let changed = 0;
+    const replies: { text: string }[] = [];
+    const bot = new TelegramBot(
+      'test-token',
+      db,
+      () => {
+        changed++;
+        app.usersChanged();
+      },
+      async (_url, init) => {
+        replies.push(JSON.parse(init!.body as string));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      },
+    );
+    const start = (username: string | undefined, id = 101, type = 'private') =>
+      bot.handleUpdate({
+        update_id: 1,
+        message: { text: '/start', from: { id, username }, chat: { id, type } },
+      });
+    await start('alice', 101, 'group');
+    assert.equal(changed, 0);
+    await start(undefined);
+    await start('missing');
+    assert.equal(changed, 0);
+    assert.equal(replies.length, 2);
+    await start('ALICE');
+    await start('alice');
+    await start('bob', 102);
+    assert.equal(changed, 3);
+    await start('alice', 999);
+    assert.equal(changed, 3);
+    assert.equal(
+      (await db.query("SELECT telegram_chat_id FROM users WHERE login='alice'")).rows[0]
+        .telegram_chat_id,
+      '101',
+    );
+    assert.ok((await request(admin, 'users.list')).data.every((user) => user.telegramLinked));
+    await bot.close();
+    await assert.rejects(() => unavailableTelegram.sendCode('101', 'alice', '123456', new Date()), {
+      code: 'TELEGRAM_UNAVAILABLE',
+    });
+    failDelivery = true;
+    assert.equal(
+      (await request(client, 'auth.challenge', { login: 'alice' })).error.code,
+      'TELEGRAM_UNAVAILABLE',
+    );
+    assert.equal(
+      (await request(client, 'auth.login', { proof: '0'.repeat(64) })).error.code,
+      'CHALLENGE_REQUIRED',
+    );
+    const storedBeforeRetry = (
+      await db.query('SELECT code FROM telegram_codes WHERE user_id=$1', [created.data.id])
+    ).rows[0].code;
+    failDelivery = false;
     assert.equal(
       (await db.query('SELECT password_hash FROM users WHERE login=$1', ['alice'])).rows[0]
         .password_hash,
@@ -132,6 +210,9 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
     );
     assert.equal((await login('bad')).error.code, 'INVALID_CREDENTIALS');
     const logged = await login('abc');
+    assert.equal(lastCode(), storedBeforeRetry);
+    assert.equal(deliveries.at(-1)!.chatId, '101');
+    assert.match(lastCode(), /^[1-9][0-9]{5}$/);
     assert.deepEqual(Object.keys(logged.data).sort(), [
       'createdAt',
       'id',
@@ -161,17 +242,82 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
       'INVALID_CREDENTIALS',
     );
     const second = await connect('client');
+    await db.query('DELETE FROM telegram_codes WHERE user_id=$1', [created.data.id]);
     const [firstChallenge, secondChallenge] = await Promise.all([
       request(client, 'auth.challenge', { login: 'alice' }),
       request(second, 'auth.challenge', { login: 'alice' }),
     ]);
     assert.deepEqual(firstChallenge.data, secondChallenge.data);
+    assert.deepEqual(Object.keys(firstChallenge.data).sort(), [
+      'challengeHash',
+      'expiresAt',
+      'telegramExpiresAt',
+    ]);
+    assert.equal(Date.parse(firstChallenge.data.telegramExpiresAt), now + 600000);
+    const initialCode = lastCode();
+    const initialProof = createProof(
+      hashPassword('abc'),
+      firstChallenge.data.challengeHash,
+      initialCode,
+    );
+    assert.equal(
+      (
+        await request(client, 'auth.login', {
+          proof: hashPassword(hashPassword('abc') + firstChallenge.data.challengeHash),
+        })
+      ).error.code,
+      'INVALID_CREDENTIALS',
+    );
+    assert.equal(
+      (
+        await request(client, 'auth.login', {
+          proof: createProof(
+            hashPassword('abc'),
+            firstChallenge.data.challengeHash,
+            initialCode === '123456' ? '654321' : '123456',
+          ),
+        })
+      ).error.code,
+      'INVALID_CREDENTIALS',
+    );
+    now += 599999;
+    assert.equal((await request(client, 'auth.login', { proof: initialProof })).ok, true);
+    assert.equal(
+      (await request(client, 'auth.login', { proof: initialProof })).error.code,
+      'CHALLENGE_REQUIRED',
+    );
+    const reused = await request(client, 'auth.challenge', { login: 'alice' });
+    assert.deepEqual(reused.data, firstChallenge.data);
+    assert.equal(lastCode(), initialCode);
+    now++;
+    assert.equal(
+      (await request(client, 'auth.login', { proof: initialProof })).error.code,
+      'TELEGRAM_CODE_EXPIRED',
+    );
+    const nextCode = await request(client, 'auth.challenge', { login: 'alice' });
+    assert.equal(nextCode.data.challengeHash, firstChallenge.data.challengeHash);
+    assert.equal(Date.parse(nextCode.data.telegramExpiresAt), now + 600000);
+    assert.equal(
+      (await request(second, 'auth.login', { proof: initialProof })).error.code,
+      'TELEGRAM_CODE_EXPIRED',
+    );
+    deliveryAdvance = 600000;
+    assert.equal(
+      (await request(client, 'auth.challenge', { login: 'alice' })).error.code,
+      'TELEGRAM_CODE_EXPIRED',
+    );
+    assert.equal(
+      (await request(client, 'auth.login', { proof: initialProof })).error.code,
+      'CHALLENGE_REQUIRED',
+    );
+    deliveryAdvance = 0;
+    await request(client, 'auth.challenge', { login: 'alice' });
     const bobChallenge = await request(second, 'auth.challenge', { login: 'bob' });
     assert.notEqual(firstChallenge.data.challengeHash, bobChallenge.data.challengeHash);
     assert.equal(
       (
         await request(second, 'auth.login', {
-          proof: createProof(hashPassword('abc'), firstChallenge.data.challengeHash),
+          proof: createProof(hashPassword('abc'), firstChallenge.data.challengeHash, lastCode()),
         })
       ).error.code,
       'INVALID_CREDENTIALS',
@@ -180,7 +326,7 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
     assert.equal(
       (
         await request(client, 'auth.login', {
-          proof: createProof(hashPassword('abc'), firstChallenge.data.challengeHash),
+          proof: createProof(hashPassword('abc'), firstChallenge.data.challengeHash, lastCode()),
         })
       ).error.code,
       'CHALLENGE_EXPIRED',
@@ -196,10 +342,16 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
     assert.ok(clientLogs.some((entry) => entry.step === 5));
     assert.ok(!clientLogs.some((entry) => /(?:t|H′) = [0-9a-f]{32}/.test(entry.message)));
     assert.ok(!JSON.stringify([...clientLogs, ...adminLogs]).includes(hashPassword('abc')));
+    assert.ok(!JSON.stringify([...clientLogs, ...adminLogs]).includes(hashPassword(lastCode())));
+    assert.ok(
+      ![...clientLogs, ...adminLogs].some((entry) =>
+        new RegExp(`\\b${lastCode()}\\b`).test(entry.message),
+      ),
+    );
     await request(admin, 'users.list');
     assert.ok(adminLogs.some((entry) => entry.message.includes(' t = ')));
     assert.ok(adminLogs.some((entry) => entry.message.includes(' H′ = ')));
-    const restarted = createApplication(db, ['http://localhost:5173'], () => now);
+    const restarted = createApplication(db, ['http://localhost:5173'], () => now, telegram);
     restarted.http.listen(0, '127.0.0.1');
     await once(restarted.http, 'listening');
     try {

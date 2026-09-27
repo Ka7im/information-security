@@ -6,6 +6,7 @@ import { createAuthJournal } from '../auth/journal.js';
 import { AdminSession } from '../users/admin-session.js';
 import { RequestError, toResponseError } from '../protocol/errors.js';
 import { parseRequest } from '../protocol/schemas.js';
+import type { TelegramSender } from '../telegram/bot.js';
 
 export function send(socket: WebSocket, message: ServerMessage) {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -16,6 +17,7 @@ interface ConnectionOptions {
   admin: boolean;
   pool: pg.Pool;
   now: () => number;
+  telegram: TelegramSender;
   broadcastToAdmins: (message: ServerMessage) => void;
 }
 
@@ -24,6 +26,7 @@ export function attachConnection({
   admin,
   pool,
   now,
+  telegram,
   broadcastToAdmins,
 }: ConnectionOptions) {
   const journal = createAuthJournal(now, (clientEntry, serverEntry) => {
@@ -33,7 +36,7 @@ export function attachConnection({
   const isConnected = () => socket.readyState === WebSocket.OPEN;
   const session = admin
     ? new AdminSession(pool, isConnected)
-    : new AuthSession(pool, now, isConnected, journal.log);
+    : new AuthSession(pool, now, isConnected, journal.log, telegram);
   let busy = false;
 
   socket.on('error', () => {

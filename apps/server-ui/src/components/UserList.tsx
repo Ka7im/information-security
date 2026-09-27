@@ -18,6 +18,9 @@ export function UserList({ users, loading }: { users: User[]; loading: boolean }
             <div>
               <strong>{user.login}</strong>
               <p>@{user.telegramLogin}</p>
+              <small>
+                {user.telegramLinked ? 'Telegram привязан' : 'Ожидается /start в Telegram-боте'}
+              </small>
             </div>
             <small>{new Date(user.createdAt).toLocaleString('ru-RU')}</small>
           </div>

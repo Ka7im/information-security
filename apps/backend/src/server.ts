@@ -3,9 +3,15 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type pg from 'pg';
 import type { ServerMessage } from '@app/shared';
 import { attachConnection, send } from './transport/connection.js';
+import { unavailableTelegram, type TelegramSender } from './telegram/bot.js';
 
 /** Создаёт транспорт; операции и состояние соединений находятся в отдельных модулях. */
-export function createApplication(pool: pg.Pool, origins: string[], now = Date.now) {
+export function createApplication(
+  pool: pg.Pool,
+  origins: string[],
+  now = Date.now,
+  telegram: TelegramSender = unavailableTelegram,
+) {
   const http = createServer((_req, res) => {
     res.writeHead(404);
     res.end();
@@ -28,11 +34,12 @@ export function createApplication(pool: pg.Pool, origins: string[], now = Date.n
       const admin = req.url === '/ws/admin';
       if (admin) admins.add(ws);
       ws.on('close', () => admins.delete(ws));
-      attachConnection({ socket: ws, admin, pool, now, broadcastToAdmins });
+      attachConnection({ socket: ws, admin, pool, now, broadcastToAdmins, telegram });
     });
   });
 
   return {
+    usersChanged: () => broadcastToAdmins({ type: 'users.changed' }),
     http,
     close: async () => {
       for (const socket of wss.clients) socket.terminate();

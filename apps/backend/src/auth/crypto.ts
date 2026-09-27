@@ -7,8 +7,11 @@ export const generateChallenge = () => randomBytes(16);
 
 export const hashChallenge = (t: Buffer): string => createHash('sha256').update(t).digest('hex');
 
-export const createProof = (passwordHash: string, challengeHash: string): string =>
-  hashPassword(passwordHash + challengeHash);
+export const createProof = (
+  passwordHash: string,
+  challengeHash: string,
+  telegramCode: string,
+): string => hashPassword(passwordHash + challengeHash + hashPassword(telegramCode));
 
 export function verifyProof(proof: string, expected: string): boolean {
   return (
