@@ -4,13 +4,13 @@ export function AuthJournal({ logs, onClear }: { logs: AuthLog[]; onClear: () =>
   return (
     <section className="panel auth-journal">
       <div className="parameter-head">
-        <h2>Журнал авторизации</h2>
+        <h2>Журнал авторизации и обмена ключами</h2>
         <button type="button" className="secondary" onClick={onClear}>
           Очистить
         </button>
       </div>
-      <div role="log" aria-live="polite" aria-label="Этапы авторизации">
-        {!logs.length && <p className="muted">Здесь появятся этапы входа.</p>}
+      <div role="log" aria-live="polite" aria-label="Этапы авторизации и обмена ключами">
+        {!logs.length && <p className="muted">Здесь появятся этапы входа и обмена DH.</p>}
         {logs.map((entry) => (
           <article key={entry.id}>
             <small>

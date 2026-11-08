@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { resolve } from 'node:path';
 dotenv.config({ path: [resolve('.env'), resolve('../../.env')], quiet: true });
 export const config = {
+  telegramAuthEnabled: process.env.TELEGRAM_AUTH_ENABLED !== 'false',
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   databaseUrl:
     process.env.DATABASE_URL ??

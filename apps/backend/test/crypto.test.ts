@@ -34,6 +34,14 @@ test('SHA-256 and exact password comparison', () => {
   assert.ok(verifyPassword('пароль ', hashPassword('пароль ')));
   assert.ok(!verifyPassword('пароль', hashPassword('пароль ')));
 });
+test('Password-only proof agrees between browser and server and differs from Telegram mode', async () => {
+  const challenge = hashChallenge(generateChallenge());
+  const expected = createProof(hashPassword('password'), challenge);
+  assert.equal(await createClientProof('password', challenge), expected);
+  assert.equal(expected, hashPassword(hashPassword('password') + challenge));
+  assert.notEqual(expected, createProof(hashPassword('password'), challenge, '123456'));
+  assert.notEqual(expected, createProof(hashPassword('wrong'), challenge));
+});
 test('RSA uses valid 2048-bit parameters', async () => {
   const r = await generateRsa();
   const p = BigInt(r.p),

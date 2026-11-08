@@ -6,10 +6,14 @@ import { TelegramBot } from './telegram/bot.js';
 const pool = createPool(config.databaseUrl);
 pool.on('error', () => console.error('Потеряно соединение с PostgreSQL.'));
 await migrate(pool);
-const bot = config.telegramBotToken
-  ? new TelegramBot(config.telegramBotToken, pool, () => app.usersChanged())
-  : undefined;
-const app = createApplication(pool, config.origins, Date.now, bot);
+const bot =
+  config.telegramAuthEnabled && config.telegramBotToken
+    ? new TelegramBot(config.telegramBotToken, pool, () => app.usersChanged())
+    : undefined;
+const app = createApplication(pool, config.origins, Date.now, bot, config.telegramAuthEnabled);
+console.log(
+  `Проверка Telegram: ${config.telegramAuthEnabled ? 'включена' : 'отключена (вход по паролю)'}.`,
+);
 bot?.start();
 app.http.listen(config.port, '127.0.0.1', () =>
   console.log(`Backend: ws://127.0.0.1:${config.port}`),

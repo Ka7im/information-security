@@ -1,3 +1,5 @@
+import { answerOffer, generateClientRsa } from '../../client/src/dh.js';
+import { hashText } from '@app/shared';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +15,7 @@ import { hashPassword, createProof } from '../src/auth/crypto.js';
 import type { AuthLog } from '@app/shared';
 import { TelegramBot, unavailableTelegram, type TelegramSender } from '../src/telegram/bot.js';
 import { RequestError } from '../src/protocol/errors.js';
-test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
+test('PostgreSQL and WebSocket lifecycle', { timeout: 300000 }, async () => {
   const pool = createPool(config.databaseUrl);
   const schema = `test_${randomUUID().replaceAll('-', '')}`;
   await pool.query(`CREATE SCHEMA ${schema}`);
@@ -66,10 +68,13 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
     }> {
       const id = randomUUID();
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          ws.off('message', listener);
-          reject(new Error('Response timeout'));
-        }, 5000);
+        const timer = setTimeout(
+          () => {
+            ws.off('message', listener);
+            reject(new Error('Response timeout'));
+          },
+          type === 'dh.init' ? 240000 : 5000,
+        );
         const listener = (raw: Buffer) => {
           const msg = JSON.parse(raw.toString());
           if (msg.id === id) {
@@ -101,6 +106,7 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
         proof: createProof(hashPassword(password), challenge.data.challengeHash, lastCode()),
       });
     }
+    assert.equal((await request(client, 'dh.init', {})).error.code, 'UNAUTHORIZED');
     assert.equal((await request(client, 'auth.me')).error.code, 'UNAUTHORIZED');
     assert.equal((await request(client, 'users.list')).error.code, 'FORBIDDEN');
     assert.equal(
@@ -145,6 +151,78 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
     );
     assert.equal((await request(admin, 'users.list')).data.length, 2);
     assert.equal(created.data.telegramLinked, false);
+    // Password-only mode works without a Telegram binding or bot transport.
+    const offline = createApplication(
+      db,
+      ['http://localhost:5173'],
+      () => now,
+      {
+        async sendCode() {
+          throw new Error('Telegram must not be contacted');
+        },
+      },
+      false,
+    );
+    offline.http.listen(0, '127.0.0.1');
+    await once(offline.http, 'listening');
+    const offlineClient = new WebSocket(
+      `ws://127.0.0.1:${(offline.http.address() as AddressInfo).port}/ws/client`,
+      { origin: 'http://localhost:5173' },
+    );
+    sockets.push(offlineClient);
+    try {
+      await once(offlineClient, 'open');
+      const challenge = await request(offlineClient, 'auth.challenge', { login: 'alice' });
+      assert.equal(challenge.ok, true);
+      assert.equal(challenge.data.telegramRequired, false);
+      assert.equal(challenge.data.telegramExpiresAt, null);
+      assert.equal(
+        (await db.query('SELECT * FROM telegram_codes WHERE user_id=$1', [created.data.id]))
+          .rowCount,
+        0,
+      );
+      assert.equal(
+        (
+          await request(offlineClient, 'auth.login', {
+            proof: createProof(hashPassword('bad'), challenge.data.challengeHash),
+          })
+        ).error.code,
+        'INVALID_CREDENTIALS',
+      );
+      assert.equal(
+        (
+          await request(offlineClient, 'auth.login', {
+            proof: createProof(hashPassword('abc'), challenge.data.challengeHash),
+          })
+        ).ok,
+        true,
+      );
+      const key = await generateClientRsa();
+      const offer = await request(offlineClient, 'dh.init', { clientKey: { n: key.n, e: key.e } });
+      const answer = await answerOffer(offer.data, key);
+      assert.equal(
+        (await request(offlineClient, 'dh.complete', answer.payload)).data.keyHash,
+        await hashText(answer.K),
+      );
+      await request(offlineClient, 'auth.logout');
+      assert.equal((await request(offlineClient, 'auth.me')).error.code, 'UNAUTHORIZED');
+      const expired = await request(offlineClient, 'auth.challenge', { login: 'alice' });
+      const savedNow = now;
+      now = Date.parse(expired.data.expiresAt);
+      assert.equal(
+        (
+          await request(offlineClient, 'auth.login', {
+            proof: createProof(hashPassword('abc'), expired.data.challengeHash),
+          })
+        ).error.code,
+        'CHALLENGE_EXPIRED',
+      );
+      now = savedNow;
+    } finally {
+      offlineClient.terminate();
+      await offline.close();
+    }
+
     assert.equal(
       (await request(client, 'auth.challenge', { login: 'alice' })).error.code,
       'TELEGRAM_NOT_LINKED',
@@ -220,7 +298,35 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
       'telegramLogin',
     ]);
     assert.equal((await request(client, 'auth.me')).data.login, 'alice');
+    const rsaClient = await generateClientRsa();
+    const dhInput = { clientKey: { n: rsaClient.n, e: rsaClient.e } };
+    const dhOffer = await request(client, 'dh.init', dhInput);
+    assert.equal(dhOffer.ok, true);
+    assert.equal(dhOffer.data.serverKey.n, created.data.rsa.n);
+    const dhAnswer = await answerOffer(dhOffer.data, rsaClient);
+    const dhResult = await request(client, 'dh.complete', dhAnswer.payload);
+    assert.equal(dhResult.ok, true);
+    assert.equal(dhResult.data.keyHash, await hashText(dhAnswer.K));
+    assert.equal(
+      (await request(client, 'dh.complete', dhAnswer.payload)).error.code,
+      'DH_REQUIRED',
+    );
+    const oldOffer = await request(client, 'dh.init', dhInput);
+    const oldAnswer = await answerOffer(oldOffer.data, rsaClient);
+    const newOffer = await request(client, 'dh.init', dhInput);
+    assert.notEqual(oldOffer.data.exchangeId, newOffer.data.exchangeId);
+    assert.equal(
+      (await request(client, 'dh.complete', oldAnswer.payload)).error.code,
+      'DH_REQUIRED',
+    );
+    assert.ok(!JSON.stringify(clientLogs).includes(dhAnswer.K));
+    await request(admin, 'users.list');
+    assert.ok(JSON.stringify(adminLogs).includes(dhAnswer.K));
     await request(client, 'auth.logout');
+    assert.equal(
+      (await request(client, 'dh.complete', dhAnswer.payload)).error.code,
+      'UNAUTHORIZED',
+    );
     assert.equal((await request(client, 'auth.me')).error.code, 'UNAUTHORIZED');
     const malformed = once(client, 'message');
     client.send('{');
@@ -252,8 +358,9 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
       'challengeHash',
       'expiresAt',
       'telegramExpiresAt',
+      'telegramRequired',
     ]);
-    assert.equal(Date.parse(firstChallenge.data.telegramExpiresAt), now + 600000);
+    assert.equal(Date.parse(firstChallenge.data.telegramExpiresAt!), now + 600000);
     const initialCode = lastCode();
     const initialProof = createProof(
       hashPassword('abc'),
@@ -296,7 +403,7 @@ test('PostgreSQL and WebSocket lifecycle', { timeout: 30000 }, async () => {
     );
     const nextCode = await request(client, 'auth.challenge', { login: 'alice' });
     assert.equal(nextCode.data.challengeHash, firstChallenge.data.challengeHash);
-    assert.equal(Date.parse(nextCode.data.telegramExpiresAt), now + 600000);
+    assert.equal(Date.parse(nextCode.data.telegramExpiresAt!), now + 600000);
     assert.equal(
       (await request(second, 'auth.login', { proof: initialProof })).error.code,
       'TELEGRAM_CODE_EXPIRED',

@@ -59,14 +59,17 @@ export class Connection {
     if (this.socket?.readyState !== WebSocket.OPEN)
       return Promise.reject(new Error('Нет подключения к серверу.'));
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(
-          new Error(
-            'Сервер не ответил вовремя. Повторите запрос; при создании пользователя сначала проверьте список.',
-          ),
-        );
-      }, 30000);
+      const timer = setTimeout(
+        () => {
+          this.pending.delete(id);
+          reject(
+            new Error(
+              'Сервер не ответил вовремя. Повторите запрос; при создании пользователя сначала проверьте список.',
+            ),
+          );
+        },
+        type === 'dh.init' ? 300000 : 30000,
+      );
       this.pending.set(id, {
         resolve: (data) => resolve(data as Operations[K]['output']),
         reject,

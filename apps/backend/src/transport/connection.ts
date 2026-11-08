@@ -18,6 +18,7 @@ interface ConnectionOptions {
   pool: pg.Pool;
   now: () => number;
   telegram: TelegramSender;
+  telegramAuthEnabled: boolean;
   broadcastToAdmins: (message: ServerMessage) => void;
 }
 
@@ -27,6 +28,7 @@ export function attachConnection({
   pool,
   now,
   telegram,
+  telegramAuthEnabled,
   broadcastToAdmins,
 }: ConnectionOptions) {
   const journal = createAuthJournal(now, (clientEntry, serverEntry) => {
@@ -36,7 +38,7 @@ export function attachConnection({
   const isConnected = () => socket.readyState === WebSocket.OPEN;
   const session = admin
     ? new AdminSession(pool, isConnected)
-    : new AuthSession(pool, now, isConnected, journal.log, telegram);
+    : new AuthSession(pool, now, isConnected, journal.log, telegram, telegramAuthEnabled);
   let busy = false;
 
   socket.on('error', () => {
@@ -53,7 +55,8 @@ export function attachConnection({
       if (busy) throw new RequestError('BUSY', 'Дождитесь завершения предыдущего запроса.');
       busy = true;
       ownsBusy = true;
-      authRequest = !admin && ['auth.challenge', 'auth.login'].includes(request.type);
+      authRequest =
+        !admin && ['auth.challenge', 'auth.login', 'dh.init', 'dh.complete'].includes(request.type);
       if (request.type === 'auth.challenge') journal.startAttempt(id);
       const data = await session.handle(request.type, request.payload);
       send(socket, { id, ok: true, data });

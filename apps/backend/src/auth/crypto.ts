@@ -10,8 +10,11 @@ export const hashChallenge = (t: Buffer): string => createHash('sha256').update(
 export const createProof = (
   passwordHash: string,
   challengeHash: string,
-  telegramCode: string,
-): string => hashPassword(passwordHash + challengeHash + hashPassword(telegramCode));
+  telegramCode?: string,
+): string =>
+  hashPassword(
+    passwordHash + challengeHash + (telegramCode === undefined ? '' : hashPassword(telegramCode)),
+  );
 
 export function verifyProof(proof: string, expected: string): boolean {
   return (

@@ -36,6 +36,18 @@ export default function App() {
           </p>
         )}
       </section>
+      {profile && (
+        <section className="panel">
+          <h2>Диффи — Хеллман с ЭЦП</h2>
+          <p role="status">{auth.dhStatus}</p>
+          {auth.sessionKey && (
+            <p style={{ overflowWrap: 'anywhere' }}>K клиента = {auth.sessionKey}</p>
+          )}
+          <button disabled={busy || !connected} onClick={() => void auth.exchange()}>
+            Повторить обмен DH
+          </button>
+        </section>
+      )}
       <AuthJournal logs={logs} onClear={clearLogs} />
     </main>
   );

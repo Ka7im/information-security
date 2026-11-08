@@ -11,6 +11,7 @@ export function createApplication(
   origins: string[],
   now = Date.now,
   telegram: TelegramSender = unavailableTelegram,
+  telegramAuthEnabled = true,
 ) {
   const http = createServer((_req, res) => {
     res.writeHead(404);
@@ -34,7 +35,15 @@ export function createApplication(
       const admin = req.url === '/ws/admin';
       if (admin) admins.add(ws);
       ws.on('close', () => admins.delete(ws));
-      attachConnection({ socket: ws, admin, pool, now, broadcastToAdmins, telegram });
+      attachConnection({
+        socket: ws,
+        admin,
+        pool,
+        now,
+        broadcastToAdmins,
+        telegram,
+        telegramAuthEnabled,
+      });
     });
   });
 

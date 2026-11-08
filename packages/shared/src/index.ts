@@ -1,3 +1,5 @@
+import type { DhOffer, RsaPublicKey, SignedHash } from './dh.js';
+export * from './dh.js';
 export interface Profile {
   id: string;
   login: string;
@@ -17,7 +19,8 @@ export interface User extends Profile {
   rsa: RsaParameters;
 }
 export interface Challenge {
-  telegramExpiresAt: string;
+  telegramRequired: boolean;
+  telegramExpiresAt: string | null;
   challengeHash: string;
   expiresAt: string;
 }
@@ -30,6 +33,11 @@ export interface AuthLog {
   message: string;
 }
 export interface Operations {
+  'dh.init': { input: { clientKey: RsaPublicKey }; output: DhOffer };
+  'dh.complete': {
+    input: SignedHash & { exchangeId: string; B: string };
+    output: { keyHash: string };
+  };
   'rsa.generate': { input: Record<string, never>; output: RsaParameters };
   'users.create': {
     input: { login: string; password: string; telegramLogin: string };

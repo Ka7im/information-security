@@ -5,7 +5,11 @@ export async function sha256(value: string): Promise<string> {
 export async function createClientProof(
   password: string,
   challengeHash: string,
-  telegramCode: string,
+  telegramCode?: string,
 ): Promise<string> {
-  return sha256((await sha256(password)) + challengeHash + (await sha256(telegramCode)));
+  return sha256(
+    (await sha256(password)) +
+      challengeHash +
+      (telegramCode === undefined ? '' : await sha256(telegramCode)),
+  );
 }
